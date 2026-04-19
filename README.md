@@ -1,6 +1,6 @@
 Profe como dijiste te pego todo el Script la arquitectura de la bases de datos,  Los Inserts , y por ultimo el ejercicio Funciones
 
-
+TODOS LOS EJERCICIOS FUERON HECHOS EN MYQSLWORKBENCH POR QUIZAS ERROR DE SYNTAXIS
 /* 
    Ejecutar En Orden ya que las tablas fueron creadas ya con sus llaves foraneas y relaciones incluyendo CONSTRAINT
    para no utilizar el ALTER y no hacer el codigo mas largo o complejo
