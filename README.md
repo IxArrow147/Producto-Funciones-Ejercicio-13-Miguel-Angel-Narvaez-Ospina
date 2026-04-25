@@ -911,3 +911,179 @@ END //
 DELIMITER ;
 #Ejemplo poniendo una fecha random
 SELECT FN_ObtenerTemporadaFecha('2026-10-10') AS Temporada_Fecha;
+
+
+
+#Triggers
+
+/* 
+  Practicamente todos los ejercicios estan relacionados con la tabla reserva , por eso los ejemplos son practicamente iguales un insert para la tabla reserva
+*/
+
+# 1.	TR_ActualizarDisponibilidadPaquete: Actualiza la disponibilidad de un paquete tras una reserva.
+
+#En el ejercicio original no existe, el dato capacidad maxima o cupos disponibles entonces creamos un alter para esta ocasion
+
+ALTER TABLE Paquete_Turistico 
+ADD cupos_disponibles INT DEFAULT 50;
+
+DELIMITER //
+CREATE TRIGGER TR_ActualizarDisponibilidadPaquete
+AFTER INSERT ON Reserva
+FOR EACH ROW
+BEGIN
+    UPDATE Paquete_Turistico
+    SET cupos_disponibles = cupos_disponibles - 
+        (NEW.cantidad_adultos + NEW.cantidad_ninos)
+    WHERE id_paquete = NEW.id_paquete;
+END //
+DELIMITER ;
+
+#pequena prueba de un insert
+INSERT INTO Reserva (
+numero_reserva, fecha_creacion, fecha_inicio, fecha_fin,
+cantidad_adultos, cantidad_ninos,
+precio_total, abonos_realizados,
+estado, id_cliente, id_metodo_pago,
+id_paquete, id_guia
+)
+VALUES ('RES100', NOW(), '2026-07-01', '2026-07-05',2, 1,0, 0,'Pendiente', 1, 1,1, 1);
+
+#Verificamos
+SELECT id_paquete, cupos_disponibles
+FROM Paquete_Turistico
+WHERE id_paquete = 1;
+
+
+# 2.	TR_CalcularCostoPaquete: Calcula automáticamente el costo de un paquete según servicios incluidos.
+
+DELIMITER //
+CREATE TRIGGER TR_CalcularCostoPaquete
+BEFORE INSERT ON Reserva
+FOR EACH ROW
+BEGIN
+    DECLARE costo_base DECIMAL(10,2);
+    DECLARE costo_actividad DECIMAL(10,2);
+
+    SELECT precio_base INTO costo_base
+    FROM Paquete_Turistico
+    WHERE id_paquete = NEW.id_paquete;
+
+    SELECT a.precio_por_persona
+    INTO costo_actividad
+    FROM Paquete_Actividad_Incluida pai
+    JOIN Actividad_Turistica a 
+        ON pai.id_actividad = a.id_actividad
+    WHERE pai.id_paquete = NEW.id_paquete
+    LIMIT 1;
+
+    SET NEW.precio_total = 
+        (costo_base + IFNULL(costo_actividad,0)) *
+        (NEW.cantidad_adultos + NEW.cantidad_ninos);
+
+END //
+DELIMITER ;
+
+#Para probar hay que hacer un insert prueba 
+INSERT INTO Reserva (
+numero_reserva, fecha_creacion, fecha_inicio, fecha_fin,
+cantidad_adultos, cantidad_ninos,
+precio_total, abonos_realizados,
+estado, id_cliente, id_metodo_pago,
+id_paquete, id_guia
+)
+VALUES ('TEST_COSTO', NOW(), '2026-06-10', '2026-06-15',2, 1,0, 0,'Pendiente', 
+1, -- id_cliente
+1, -- id_metodo_pago
+1, -- id_paquete
+1 -- id_guia
+);
+#un pequeno select para verificar
+SELECT numero_reserva, precio_total
+FROM Reserva
+WHERE numero_reserva = 'TEST_COSTO';
+
+# 3.	TR_VerificarCapacidadActividad: Verifica que no se exceda la capacidad de una actividad turística.
+#Con el primer alter de capacidad podemos hacer este ejercicio 
+DELIMITER //
+CREATE TRIGGER TR_VerificarCapacidadActividad
+BEFORE INSERT ON Reserva
+FOR EACH ROW
+BEGIN
+    DECLARE capacidad INT;
+    DECLARE total_personas INT;
+
+    SET total_personas = NEW.cantidad_adultos + NEW.cantidad_ninos;
+
+    SELECT a.capacidad_maxima
+    INTO capacidad
+    FROM Paquete_Actividad_Incluida pai
+    JOIN Actividad_Turistica a 
+        ON pai.id_actividad = a.id_actividad
+    WHERE pai.id_paquete = NEW.id_paquete
+    LIMIT 1;
+	
+    IF total_personas > capacidad THEN -- Mensaje de Error
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Capacidad excedida';
+    END IF;
+
+END //
+DELIMITER ;
+# un insert trampa que supera la capacidad maxima debe de dar error, igual pongo donde se puede modicar si queres hacer un insert normal, la capacidad maxima o cupos esta establecido en un max de 50
+INSERT INTO Reserva (
+numero_reserva, fecha_creacion, fecha_inicio, fecha_fin,
+cantidad_adultos, cantidad_ninos,
+precio_total, abonos_realizados,
+estado, id_cliente, id_metodo_pago,
+id_paquete, id_guia
+)
+VALUES (
+'TEST_CAP', NOW(), '2026-06-10', '2026-06-15',
+100 -- esto son 100 adultos deberia de no entrar este insert y dar error, la capacidad maxima es 50
+, 0 -- Cantidad de ninos, este valor y el anterior se suman y lo asignan a una variable que se llama total_personas y esta la compara con el valor de la tabla capacidad que son 50
+,0, 0,'Pendiente', 
+1, -- id_cliente
+1, -- id_metodo_pago
+1, -- id_paquete
+1 -- id_guia
+);
+# Aqui no deberia de aparecer nada puesto que dio error el anterior insert, pero si entra queda registrada la reserva
+SELECT * FROM Reserva WHERE numero_reserva = 'TEST_CAP';
+
+# 4.	TR_ActualizarEstadisticasDestino: Actualiza estadísticas de popularidad de destinos tras reservas.
+
+DELIMITER //
+CREATE TRIGGER TR_ActualizarEstadisticasDestino
+AFTER INSERT ON Reserva
+FOR EACH ROW
+BEGIN
+    UPDATE Destino_Turistico d
+    JOIN Actividad_Turistica a 
+        ON d.id_destino = a.id_destino
+    JOIN Paquete_Actividad_Incluida pai 
+        ON a.id_actividad = pai.id_actividad
+    SET d.nivel_popularidad = IFNULL(d.nivel_popularidad,0) + 1
+    WHERE pai.id_paquete = NEW.id_paquete;
+END //
+DELIMITER ;
+#El nivel de popularidad es incremental a medida de que hayan mas reservas dependiendo del id del paquete seleccionado 
+#Mismo insert de siempre para testear
+INSERT INTO Reserva (
+numero_reserva, fecha_creacion, fecha_inicio, fecha_fin,
+cantidad_adultos, cantidad_ninos,
+precio_total, abonos_realizados,
+estado, id_cliente, id_metodo_pago,
+id_paquete, id_guia
+)
+VALUES (
+'TEST_POP', NOW(), '2026-06-10', '2026-06-15',2, 0,0, 0,'Pendiente', 
+1, -- id_cliente
+1, -- id_metodo_pago
+1, -- id_paquete
+1 -- id_guia
+);
+#Para probar puede testar con otro id para ver las demas paquetes
+SELECT nivel_popularidad
+FROM Destino_Turistico
+WHERE id_destino = 1;
